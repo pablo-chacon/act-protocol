@@ -314,6 +314,7 @@ This repository contains general-purpose, open-source smart contracts implementi
 The authors and contributors:
 
 * do not operate a service marketplace or platform
+* do not perform governance or supervise service types 
 * do not verify or supervise service providers or customers
 * do not guarantee service delivery or outcomes
 * do not perform KYC, AML, or identity verification

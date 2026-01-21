@@ -1,10 +1,16 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+pragma solidity ^0.8.24;
+
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 contract ActEscrow {
+    using SafeERC20 for IERC20;
+
     struct Escrow {
         address payer;
         address provider;
+        address paymentToken; // ERC-20
         uint256 amount;
         uint64 expiresAt;
         bool released;
@@ -20,12 +26,13 @@ contract ActEscrow {
 
     error InvalidTreasury();
     error InvalidCore();
+    error InvalidToken();
     error ZeroAmount();
+    error ZeroProvider();
     error AlreadyLocked();
     error AlreadyReleased();
+    error InvalidEscrow();
     error OnlyCore();
-    error PayoutFailed();
-    error FeeFailed();
 
     modifier onlyCore() {
         if (msg.sender != core) revert OnlyCore();
@@ -39,13 +46,18 @@ contract ActEscrow {
         core = _core;
     }
 
+    /// @notice Records an escrow that has already been funded (tokens transferred in by core).
     function lock(
         bytes32 serviceId,
         address payer,
         address provider,
+        address paymentToken,
+        uint256 amount,
         uint64 expiresAt
-    ) external payable onlyCore {
-        if (msg.value == 0) revert ZeroAmount();
+    ) external onlyCore {
+        if (amount == 0) revert ZeroAmount();
+        if (provider == address(0)) revert ZeroProvider();
+        if (paymentToken == address(0)) revert InvalidToken();
 
         Escrow storage e = escrows[serviceId];
         if (e.amount != 0) revert AlreadyLocked();
@@ -53,14 +65,17 @@ contract ActEscrow {
         escrows[serviceId] = Escrow({
             payer: payer,
             provider: provider,
-            amount: msg.value,
+            paymentToken: paymentToken,
+            amount: amount,
             expiresAt: expiresAt,
             released: false
         });
     }
 
+    /// @notice Releases escrowed funds (core-only).
     function release(bytes32 serviceId) external onlyCore {
         Escrow storage e = escrows[serviceId];
+        if (e.amount == 0) revert InvalidEscrow();
         if (e.released) revert AlreadyReleased();
 
         e.released = true;
@@ -68,12 +83,9 @@ contract ActEscrow {
         uint256 fee = (e.amount * FEE_BPS) / BPS_DENOM;
         uint256 payout = e.amount - fee;
 
-        if (fee > 0) {
-            (bool okFee, ) = payable(treasury).call{value: fee}("");
-            if (!okFee) revert FeeFailed();
-        }
+        IERC20 t = IERC20(e.paymentToken);
 
-        (bool okPay, ) = payable(e.provider).call{value: payout}("");
-        if (!okPay) revert PayoutFailed();
+        if (fee > 0) t.safeTransfer(treasury, fee);
+        t.safeTransfer(e.provider, payout);
     }
 }

@@ -9,11 +9,34 @@ ACT is a **minimal, neutral Ethereum settlement protocol** for real-world, non-d
 
 Examples include: personal training, massage, psychologist sessions, cleaning, consulting, repairs, construction, contracting, and other services performed outside the blockchain.
 
-Authors of ACT Protocol is **NOT** responsible in any way for any kind of service registered. 
+Authors of ACT Protocol is **not responsible** in any way for any kind of service registered. 
 
 ACT does not operate a marketplace, does not verify service delivery, and does not manage identity, reputation, scheduling, or disputes.
 
 ACT is a protocol, not a platform.
+
+---
+
+## Legal Disclaimer
+
+This repository contains general-purpose, open-source smart contracts implementing a neutral settlement protocol.
+
+The authors and contributors:
+
+* do not operate a service marketplace or platform
+* do not verify or supervise service providers or customers
+* do not guarantee service delivery or outcomes
+* do not perform KYC, AML, or identity verification
+* do not provide legal, financial, or regulatory advice
+* are not responsible for deployments, integrations, or real-world usage
+
+All deployments of ACT Protocol are performed at the risk of the deployer and the integrating platform.
+
+No warranty of any kind is provided.
+The software is offered strictly as-is, without guarantees of fitness for any purpose.
+The authors are not liable for any damages, losses, claims, or issues arising from the use, misuse, or failure of this software or any derivative work.
+
+By using, deploying, integrating, or interacting with this software in any form, you agree that all responsibility for legal compliance, operation, and outcomes lies solely with you.
 
 ---
 
@@ -255,6 +278,7 @@ All identifying information remains off-chain.
 
 ACT intentionally does not handle:
 
+* service registry
 * discovery or search
 * pricing logic beyond published offers
 * identity, KYC, or AML
@@ -293,36 +317,9 @@ They exist solely as deterministic settlement proofs.
 
 ---
 
-## Composability
+## **Contact**
 
-ACT composes cleanly with other neutral settlement rails:
-
-* DeBNB -> accommodation
-* DeDe -> delivery
-* KEY -> vehicles
-* PASS -> access
-* CUT -> media
-
-Platforms may combine these protocols freely without coordination or permission.
-
----
-
-## Legal Disclaimer
-
-This repository contains general-purpose, open-source smart contracts implementing a neutral settlement protocol.
-
-The authors and contributors:
-
-* do not operate a service marketplace or platform
-* do not perform governance or supervise service types 
-* do not verify or supervise service providers or customers
-* do not guarantee service delivery or outcomes
-* do not perform KYC, AML, or identity verification
-* do not provide legal, financial, or regulatory advice
-
-All deployments and integrations are performed at the sole risk of deployers and users.
-
-This software is provided “as is”, without warranty of any kind.
+**[Contact Email](pablo-chacon-ai@proton.me)**
 
 ---
 

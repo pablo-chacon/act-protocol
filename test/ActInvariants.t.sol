@@ -39,9 +39,6 @@ contract ActHandler is Test {
     bytes32[] public serviceIds;
     uint256 public constant MAX_SERVICES = 32;
 
-    // Track last computed expiry for warp helper (not relied upon for correctness).
-    uint64 public lastExpiresAt;
-
     constructor(ActCore _core, MockERC20 _payToken, address _treasury) {
         core = _core;
         escrow = _core.escrow();
@@ -67,20 +64,18 @@ contract ActHandler is Test {
         vm.stopPrank();
     }
 
-    // ----------------------------
     // Handler actions
-    // ----------------------------
-
-    /// @notice Create a new service for a random buyer/provider with bounded slots.
-    function createService(uint256 buyerSeed, uint256 providerSeed, uint64 startOffset, uint64 duration, bytes32 serviceHash)
-        external
-    {
+    /// @notice Provider creates a service offer with bounded slots.
+    function createOffer(
+        uint256 providerSeed,
+        uint64 startOffset,
+        uint64 duration,
+        bytes32 serviceHash
+    ) external {
         if (serviceIds.length >= MAX_SERVICES) return;
 
-        address buyer = (buyerSeed % 2 == 0) ? buyerA : buyerB;
         address provider = (providerSeed % 2 == 0) ? providerA : providerB;
 
-        // Ensure valid future slotEnd > now and slotEnd > slotStart.
         uint64 nowTs = uint64(block.timestamp);
 
         // Constrain start in [now+1h, now+30d]
@@ -90,53 +85,106 @@ contract ActHandler is Test {
         uint64 dur = 1 hours + (duration % (7 days));
         uint64 end = start + dur;
 
-        // Constrain amount in [1e6 .. 1e18] to avoid dust edge cases
-        uint256 amt = 1e6 + (uint256(uint160(buyer)) % 1e18);
+        // Constrain amount in [1e6 .. 1e18] without needing extra seeds
+        uint256 amt = 1e6 + (uint256(uint160(provider)) % 1e18);
 
-        vm.startPrank(buyer);
-        (bytes32 serviceId, uint256 tokenId) =
-            core.createService(provider, address(payToken), amt, serviceHash, start, end);
+        vm.startPrank(provider);
+        bytes32 serviceId = core.createServiceOffer(
+            address(payToken),
+            amt,
+            serviceHash,
+            start,
+            end
+        );
         vm.stopPrank();
 
         serviceIds.push(serviceId);
-
-        // Cache expiresAt for warp helper
-        (, , , , , , , uint64 expiresAt, ) = core.services(serviceId);
-        lastExpiresAt = expiresAt;
-
-        // Basic sanity: token minted to buyer
-        assertEq(handle.ownerOf(tokenId), buyer);
     }
 
-    /// @notice Attempt finalize as buyer (may revert if wrong buyerSeed/serviceSeed).
+    /// @notice Buyer accepts an existing offer and funds escrow. Mints handle to buyer.
+    function acceptOffer(uint256 buyerSeed, uint256 serviceSeed) external {
+        if (serviceIds.length == 0) return;
+
+        bytes32 serviceId = serviceIds[serviceSeed % serviceIds.length];
+
+        (
+            address buyer,
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
+            bool accepted,
+            bool finalized
+        ) = core.services(serviceId);
+
+        if (finalized) return;
+        if (accepted) return;
+        if (buyer != address(0)) return; // sanity
+
+        address buyerAddr = (buyerSeed % 2 == 0) ? buyerA : buyerB;
+
+        vm.startPrank(buyerAddr);
+        try core.acceptService(serviceId) returns (uint256 tokenId) {
+            // Basic sanity: token minted to buyer
+            assertEq(handle.ownerOf(tokenId), buyerAddr);
+
+            // Escrow entry must exist and be unreleased immediately after accept
+            (, , , uint256 amount, , bool released) = escrow.escrows(serviceId);
+            assertTrue(amount != 0);
+            assertTrue(!released);
+        } catch {}
+        vm.stopPrank();
+    }
+
+    /// @notice Attempt finalize as buyer (may revert if not accepted, wrong buyer, or already finalized).
     function finalizeAsBuyer(uint256 buyerSeed, uint256 serviceSeed) external {
         if (serviceIds.length == 0) return;
 
         bytes32 serviceId = serviceIds[serviceSeed % serviceIds.length];
-        (address buyer, , , , , , , , bool finalized) = core.services(serviceId);
-        if (finalized) return;
+        (address buyer, , , , , , , , bool accepted, bool finalized) = core.services(serviceId);
+        if (!accepted || finalized) return;
 
         address caller = (buyerSeed % 2 == 0) ? buyerA : buyerB;
         vm.prank(caller);
-        // Buyer finalize only succeeds if caller is actual buyer
         try core.finalize(serviceId) {} catch {}
-        // no assertions here; invariants cover correctness
-        buyer; // silence unused if optimizer rearranges
+        buyer; // silence unused
     }
 
-    /// @notice Attempt finalize as provider (may revert if wrong providerSeed/serviceSeed).
+    /// @notice Attempt finalize as provider (may revert if not accepted, wrong provider, or already finalized).
     function finalizeAsProvider(uint256 providerSeed, uint256 serviceSeed) external {
         if (serviceIds.length == 0) return;
 
         bytes32 serviceId = serviceIds[serviceSeed % serviceIds.length];
-        (, address provider, , , , , , , bool finalized) = core.services(serviceId);
-        if (finalized) return;
+        (, address provider, , , , , , , bool accepted, bool finalized) = core.services(serviceId);
+        if (!accepted || finalized) return;
 
         address caller = (providerSeed % 2 == 0) ? providerA : providerB;
         vm.prank(caller);
-        // Provider finalize only succeeds if caller is actual provider
         try core.finalize(serviceId) {} catch {}
         provider; // silence unused
+    }
+
+    /// @notice Attempt finalize as random address. Only valid after expiry.
+    function finalizeAsRando(uint256 serviceSeed) external {
+        if (serviceIds.length == 0) return;
+
+        bytes32 serviceId = serviceIds[serviceSeed % serviceIds.length];
+        (, , , , , , , uint64 expiresAt, bool accepted, bool finalized) = core.services(serviceId);
+        if (!accepted || finalized) return;
+
+        vm.prank(rando);
+        if (block.timestamp < expiresAt) {
+            // Must not be allowed pre-expiry
+            try core.finalize(serviceId) {
+                fail("rando finalized before expiry");
+            } catch {}
+        } else {
+            // May succeed after expiry
+            try core.finalize(serviceId) {} catch {}
+        }
     }
 
     /// @notice Warp forward by a bounded amount to explore expiry edges.
@@ -157,12 +205,13 @@ contract ActHandler is Test {
 }
 
 /// @title ActInvariants
-/// @notice Production-grade invariant suite proving:
-///   - handles (ERC-721) are non-transferable
+/// @notice Invariant suite proving:
+///   - handle (ERC-721) is non-transferable and only exists after acceptance
 ///   - escrow cannot double-release
-///   - after expiry, finalization is always possible (liveness) without relying on a platform
+///   - after expiry, finalization is always possible (liveness)
 ///   - fee math is bounded and does not exceed 0.5%
 ///   - settlement burns the handle token
+///   - finalize authorization cannot be bypassed pre-expiry
 contract ActInvariants is StdInvariant, Test {
     ActCore internal core;
     ActEscrow internal escrow;
@@ -190,25 +239,43 @@ contract ActInvariants is StdInvariant, Test {
         targetContract(address(handler));
     }
 
-    // ----------------------------
-    // Invariant: handle is non-transferable
-    // ----------------------------
-    function invariant_handleIsNonTransferable() external {
+    // Invariant: handle exists only after acceptance and is non-transferable
+    function invariant_handleNonTransferableAndLifecycleCorrect() external {
         uint256 n = handler.servicesLength();
         for (uint256 i = 0; i < n; i++) {
             bytes32 serviceId = handler.serviceIdAt(i);
-            (, , , , , , , , bool finalized) = core.services(serviceId);
+
+            (
+                address buyer,
+                ,
+                ,
+                ,
+                ,
+                ,
+                ,
+                ,
+                bool accepted,
+                bool finalized
+            ) = core.services(serviceId);
+
             uint256 tokenId = uint256(serviceId);
 
+            if (!accepted) {
+                // Not accepted -> token must not exist
+                vm.expectRevert();
+                handle.ownerOf(tokenId);
+                continue;
+            }
+
             if (finalized) {
-                // Burned -> ownerOf must revert
+                // Finalized -> burned -> ownerOf must revert
                 vm.expectRevert();
                 handle.ownerOf(tokenId);
             } else {
-                // Exists and cannot be transferred
+                // Accepted and not finalized -> token exists for buyer and cannot be transferred
                 address owner = handle.ownerOf(tokenId);
+                assertEq(owner, buyer);
 
-                // Try to transfer; must revert always.
                 vm.startPrank(owner);
                 vm.expectRevert(ActToken.TransfersDisabled.selector);
                 handle.transferFrom(owner, address(0xDEAD), tokenId);
@@ -217,44 +284,46 @@ contract ActInvariants is StdInvariant, Test {
         }
     }
 
-    // ----------------------------
-    // Invariant: escrow can’t be released twice; release implies immutable accounting.
-    // ----------------------------
+    // Invariant: escrow cannot be released twice (and only core can release)
     function invariant_escrowNoDoubleRelease() external {
         uint256 n = handler.servicesLength();
         for (uint256 i = 0; i < n; i++) {
             bytes32 serviceId = handler.serviceIdAt(i);
+
             (address payer, address provider, address tokenAddr, uint256 amount, uint64 expiresAt, bool released) =
                 escrow.escrows(serviceId);
 
-            // For created services, escrow must be well-formed.
-            // Note: payer/provider can be checked against core.service data as well.
-            if (amount != 0) {
-                assertTrue(payer != address(0));
-                assertTrue(provider != address(0));
-                assertEq(tokenAddr, address(payToken));
-                assertTrue(expiresAt != 0);
+            // Escrow only exists after acceptance
+            if (amount == 0) continue;
 
-                if (released) {
-                    // Snapshot -> calling release again must revert (core-only, already released)
-                    uint256 snap = vm.snapshot();
-                    vm.startPrank(address(core));
-                    vm.expectRevert(ActEscrow.AlreadyReleased.selector);
-                    escrow.release(serviceId);
-                    vm.stopPrank();
-                    vm.revertTo(snap);
-                }
+            assertTrue(payer != address(0));
+            assertTrue(provider != address(0));
+            assertEq(tokenAddr, address(payToken));
+            assertTrue(expiresAt != 0);
+
+            if (released) {
+                uint256 snap = vm.snapshot();
+
+                // Non-core must never be able to release
+                vm.prank(address(0xBAD));
+                vm.expectRevert(ActEscrow.OnlyCore.selector);
+                escrow.release(serviceId);
+
+                // Core cannot release twice
+                vm.startPrank(address(core));
+                vm.expectRevert(ActEscrow.AlreadyReleased.selector);
+                escrow.release(serviceId);
+                vm.stopPrank();
+
+                vm.revertTo(snap);
             }
         }
     }
 
-    // ----------------------------
-    // Invariant: fee math bounded (<= 0.5%); settlement conserves value
-    // ----------------------------
-    function invariant_feeBoundedAndConservesValue() external {
+    // Invariant: fee bounded (<= 0.5%) and escrow balance equals outstanding unreleased sums
+    function invariant_feeBoundedAndEscrowBalanceCorrect() external {
         uint256 n = handler.servicesLength();
 
-        // Compute expected escrowed balance = sum of amounts for unreleased escrows
         uint256 expectedEscrowBal = 0;
 
         for (uint256 i = 0; i < n; i++) {
@@ -263,28 +332,27 @@ contract ActInvariants is StdInvariant, Test {
             if (amount == 0) continue;
 
             uint256 fee = (amount * escrow.FEE_BPS()) / escrow.BPS_DENOM();
-            assertLe(fee, (amount * 50) / 10_000); // explicit 0.5% cap
+            assertLe(fee, (amount * 50) / 10_000);
 
             if (!released) expectedEscrowBal += amount;
         }
 
-        // Escrow contract balance should match outstanding unreleased sums.
-        // This is true because funding is atomic: buyer -> escrow on create, and release drains that escrow entry.
         assertEq(payToken.balanceOf(address(escrow)), expectedEscrowBal);
     }
 
     // ----------------------------
     // Invariant: liveness (funds cannot be locked indefinitely)
     //
-    // For any service not yet finalized, it must always be possible to finalize
-    // by the buyer/provider at any time, or by anyone after expiry.
-    //
-    // We prove "possibility" without mutating global state by using snapshot/revert.
+    // For any accepted service not finalized:
+    // - buyer or provider can finalize pre-expiry
+    // - anyone can finalize after expiry
+    // We prove possibility via snapshot/revert.
     // ----------------------------
     function invariant_liveness_finalizeAlwaysPossible() external {
         uint256 n = handler.servicesLength();
         for (uint256 i = 0; i < n; i++) {
             bytes32 serviceId = handler.serviceIdAt(i);
+
             (
                 address buyer,
                 address provider,
@@ -294,16 +362,16 @@ contract ActInvariants is StdInvariant, Test {
                 ,
                 ,
                 uint64 expiresAt,
+                bool accepted,
                 bool finalized
             ) = core.services(serviceId);
 
-            if (buyer == address(0) || finalized) continue;
+            if (!accepted || finalized) continue;
 
-            // Snapshot and prove one of the allowed finalizers can always settle.
             uint256 snap = vm.snapshot();
 
             if (block.timestamp < expiresAt) {
-                // Buyer can finalize anytime
+                // Buyer can always finalize pre-expiry
                 vm.prank(buyer);
                 core.finalize(serviceId);
             } else {
@@ -321,6 +389,8 @@ contract ActInvariants is StdInvariant, Test {
             assertTrue(released);
 
             vm.revertTo(snap);
+
+            provider; // silence unused in some optimizer paths
         }
     }
 
@@ -331,25 +401,38 @@ contract ActInvariants is StdInvariant, Test {
         uint256 n = handler.servicesLength();
         for (uint256 i = 0; i < n; i++) {
             bytes32 serviceId = handler.serviceIdAt(i);
-            (address buyer, address provider, , , , , , uint64 expiresAt, bool finalized) = core.services(serviceId);
 
-            if (buyer == address(0) || finalized) continue;
+            (
+                address buyer,
+                address provider,
+                ,
+                ,
+                ,
+                ,
+                ,
+                uint64 expiresAt,
+                bool accepted,
+                bool finalized
+            ) = core.services(serviceId);
+
+            if (!accepted || finalized) continue;
 
             if (block.timestamp < expiresAt) {
                 uint256 snap = vm.snapshot();
 
-                // A random address must not be able to finalize before expiry.
+                // Random address must not be able to finalize before expiry
                 vm.prank(address(0xBAD));
                 vm.expectRevert(ActCore.NotAuthorized.selector);
                 core.finalize(serviceId);
 
-                // But buyer/provider must still be able to
+                // Buyer must be able to finalize
                 vm.prank(buyer);
                 core.finalize(serviceId);
 
                 vm.revertTo(snap);
-                provider; // silence unused
             }
+
+            provider; // silence unused in some optimizer paths
         }
     }
 }

@@ -1,3 +1,6 @@
-out/
-cache/
+/out
+/cache
 .env
+foundry.lock
+/lib
+/node_modules

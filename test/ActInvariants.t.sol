@@ -222,7 +222,7 @@ contract ActInvariants is StdInvariant, Test {
     ActHandler internal handler;
 
     function setUp() external {
-        treasury = address(0xTREA5);
+        treasury = address(0x000000000000000000000000000000000000dEaD);
 
         // Deploy protocol
         core = new ActCore(treasury);
@@ -278,7 +278,7 @@ contract ActInvariants is StdInvariant, Test {
 
                 vm.startPrank(owner);
                 vm.expectRevert(ActToken.TransfersDisabled.selector);
-                handle.transferFrom(owner, address(0xDEAD), tokenId);
+                handle.transferFrom(owner, address(0x000000000000000000000000000000000000dEaD), tokenId);
                 vm.stopPrank();
             }
         }
@@ -376,7 +376,7 @@ contract ActInvariants is StdInvariant, Test {
                 core.finalize(serviceId);
             } else {
                 // Anyone can finalize after expiry
-                vm.prank(address(0xF1NAL1ZER));
+                vm.prank(address(0x000000000000000000000000000000000000dEaD));
                 core.finalize(serviceId);
             }
 

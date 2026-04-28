@@ -19,7 +19,7 @@ cbor_metadata = false
 
 # Gas / Runtime Assumptions
 # Explicitly disable legacy assumptions
-gas_reports = false
+gas_reports = []
 
 # Testing / Fuzzing
 [fuzz]
@@ -32,3 +32,8 @@ depth = 64
 
 # Prevent accidental mainnet broadcast from tests
 eth_rpc_url = ""
+
+remappings = [
+    "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+    "forge-std/=lib/forge-std/src/"
+]

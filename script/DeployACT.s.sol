@@ -19,6 +19,6 @@ contract DeployACT is Script {
         console2.log("ACT_ESCROW=", address(core.escrow()));
         console2.log("ACT_TOKEN=", address(core.token()));
         console2.log("PROTOCOL_TREASURY=", protocolTreasury);
-        console2.log("PROTOCOL_FEE_BPS=50");
+        console2.log("PROTOCOL_BPS=50");
     }
 }

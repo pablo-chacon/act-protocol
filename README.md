@@ -91,6 +91,17 @@ It exists solely as cryptographic proof of a single service settlement lifecycle
 
 ---
 
+## Ethereum Mainnet Deployment
+
+Official ACT Protocol contract addresses:
+
+- ActToken: 0x5B81FcA920fCdf667B310e8ae1F78a69cff49db9
+- ActEscrow: 0xE69bDf3279f545eA541aDF3AEB2153C052EbD1AF
+- ActCore: 0x70C5Ec74317EdFab13314B89342E1F70BaCa018e
+- ActTreasury: 0x44504504938CcBF8D0d99B370A882b94ffCf2423
+
+---
+
 ## Service Lifecycle
 
 ACT separates service offering from service acceptance.

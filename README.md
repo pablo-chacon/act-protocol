@@ -76,7 +76,7 @@ Once deployed, ACT is never changed.
 
 ACT protocol **Quick Start Templates** repository:
 
-https://github.com/pablo-chacon/act-protocol
+https://github.com/pablo-chacon/act-templates
 
 ---
 
